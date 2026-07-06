@@ -447,11 +447,15 @@ async def lifespan(app: FastAPI):
             else:
                 await _run_initial_sync_safely()
 
-    event_handler = CSVHandler()
-    observer = Observer()
-    observer.schedule(event_handler, path=os.path.dirname(CSV_FILE) or ".", recursive=False)
-    threading.Thread(target=observer.start, daemon=True).start()
-    print("👀 Watching CSV file for changes...")
+    watch_dir = os.path.dirname(CSV_FILE) or "."
+    if os.path.isdir(watch_dir):
+        event_handler = CSVHandler()
+        observer = Observer()
+        observer.schedule(event_handler, path=watch_dir, recursive=False)
+        threading.Thread(target=observer.start, daemon=True).start()
+        print("👀 Watching CSV file for changes...")
+    else:
+        print(f"⚠️ {watch_dir}/ not found, skipping CSV watcher (no local CSV on this host).")
 
     yield
 
