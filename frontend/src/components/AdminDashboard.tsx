@@ -3,10 +3,23 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../firebase/config";
-import { Shield, UserCheck, CheckCircle, XCircle, LogOut, RefreshCw, AlertTriangle, Waves, Building2, Send, MapPin, Clock, Droplets, Users, UploadCloud, History as HistoryIcon, ChevronDown, FlaskConical } from "lucide-react";
+import { Shield, UserCheck, CheckCircle, XCircle, LogOut, RefreshCw, AlertTriangle, Waves, Building2, Send, MapPin, Clock, Droplets, Users, UploadCloud, History as HistoryIcon, ChevronDown, FlaskConical, Map as MapIcon, Image as ImageIcon } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import * as api from "../utils/api";
 import { type IncidentReport, type ReportStatus, type SensorCategory } from "../components/IncidentCard";
+import { MapContainer, TileLayer, Marker } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconUrl: markerIcon,
+  iconRetinaUrl: markerIcon2x,
+  shadowUrl: markerShadow,
+});
 
 // state name -> admin_id prefix code, mirrors backend/main.py's STATE_CODES
 const STATE_CODES: Record<string, string> = {
@@ -47,6 +60,7 @@ const AdminDashboard: React.FC = () => {
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [reportNotes, setReportNotes] = useState<Record<string, string>>({});
   const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
+  const [showMapStates, setShowMapStates] = useState<Record<string, boolean>>({});
 
   const [uploadPassword, setUploadPassword] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -541,18 +555,43 @@ const AdminDashboard: React.FC = () => {
                 return (
                 <div key={report.id} className="group flex flex-col overflow-hidden transition-all duration-300 bg-white/70 backdrop-blur-md border border-white/60 shadow-[0_4px_16px_rgb(0,0,0,0.04)] rounded-xl hover:border-blue-200/50 hover:shadow-[0_12px_32px_rgb(0,0,0,0.08)] hover:-translate-y-1">
                   
-                  {/* Image Area - Minimal */}
-                  {report.imageUrl && (
-                    <div className="relative w-full h-40 bg-slate-100 border-b border-slate-100">
-                      <img src={api.getFullImageUrl(report.imageUrl)} alt="Incident" className="object-cover w-full h-full transition-transform duration-500 group-hover:scale-105" />
-                      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/60 to-transparent" />
+                  {/* Image / Map Area */}
+                  {(report.imageUrl || (report.location.lat && report.location.lng)) && (
+                    <div className="relative h-48 w-full bg-slate-100 border-b border-slate-100 group/media z-0">
+                      {showMapStates[report.id] && report.location.lat && report.location.lng ? (
+                        <div className="w-full h-full relative z-0">
+                          <MapContainer center={[report.location.lat, report.location.lng]} zoom={16} className="w-full h-full">
+                            <TileLayer
+                              attribution='&copy; <a href="https://www.esri.com/">Esri</a>'
+                              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                            />
+                            <Marker position={[report.location.lat, report.location.lng]} />
+                          </MapContainer>
+                        </div>
+                      ) : report.imageUrl ? (
+                        <img src={api.getFullImageUrl(report.imageUrl)} alt="Incident" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-slate-400">No Image Available</div>
+                      )}
                       
-                      <div className="absolute bottom-2.5 left-3 flex items-center text-white/90 text-xs font-medium drop-shadow-md">
+                      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/60 to-transparent pointer-events-none z-10" />
+                      
+                      {/* Toggle Button */}
+                      {report.imageUrl && report.location.lat && report.location.lng && (
+                        <button
+                          onClick={() => setShowMapStates(prev => ({ ...prev, [report.id]: !prev[report.id] }))}
+                          className="absolute top-3 left-3 z-20 flex items-center gap-1.5 rounded-md bg-white/95 backdrop-blur-sm px-2.5 py-1 text-[11px] font-bold text-slate-700 shadow-sm border border-slate-200/50 hover:bg-white transition-colors"
+                        >
+                          {showMapStates[report.id] ? <><ImageIcon className="w-3.5 h-3.5" /> View Photo</> : <><MapIcon className="w-3.5 h-3.5" /> Satellite View</>}
+                        </button>
+                      )}
+            
+                      <div className="absolute bottom-2.5 left-3 flex items-center text-white/90 text-xs font-medium drop-shadow-md z-10">
                         <MapPin className="h-3.5 w-3.5 mr-1" />
                         {report.location.district || report.location.state || "Unknown location"}
                       </div>
             
-                      <div className={`absolute top-3 right-3 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 bg-white/95 backdrop-blur-sm border shadow-sm ${cat.text} ${cat.border}`}>
+                      <div className={`absolute top-3 right-3 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 bg-white/95 backdrop-blur-sm border shadow-sm z-10 ${cat.text} ${cat.border}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${cat.dot}`} />
                         {cat.label}
                       </div>
