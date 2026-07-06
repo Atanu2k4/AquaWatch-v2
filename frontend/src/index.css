@@ -59,7 +59,7 @@
   }
 
   h1, h2, h3 {
-    font-family: 'Quintessential', cursive;
+    font-family: var(--font-inter);
     color: var(--color-brand-blue, #1e3a8a);
   }
 

@@ -42,7 +42,7 @@ export const LandingPage: React.FC = () => {
       <main className="w-full">
         <section className="w-full min-h-screen flex flex-col items-center justify-center text-center relative px-6 overflow-hidden">
           
-          <h1 className="font-serif text-6xl sm:text-7xl md:text-8xl lg:text-[8rem] leading-[0.9] tracking-tight relative z-10 flex flex-col items-center w-full max-w-full">
+          <h1 className="font-serif text-7xl sm:text-8xl md:text-9xl lg:text-[9rem] leading-[0.9] tracking-tight relative z-10 flex flex-col items-center w-full max-w-full">
             <span>National</span>
             <span className="-mt-2 md:-mt-4">groundwater</span>
           </h1>
@@ -79,7 +79,7 @@ export const LandingPage: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex flex-col flex-1">
-                    <h3 className="font-serif text-3xl leading-tight mb-4">{f.title}</h3>
+                    <h3 className="font-serif text-4xl leading-tight mb-4">{f.title}</h3>
                     <p className="text-xs uppercase font-bold tracking-wider opacity-70 leading-relaxed mb-8 flex-1">{f.desc}</p>
                     <div className="flex justify-between items-end border-t border-theme-text/20 pt-6">
                       <span className="text-xs uppercase font-semibold opacity-60">India</span>
@@ -94,11 +94,11 @@ export const LandingPage: React.FC = () => {
 
         {/* ── BOTTOM CTA ── */}
         <section className="py-32 px-6 text-center flex flex-col items-center">
-          <p className="max-w-md mx-auto text-lg md:text-xl font-serif italic mb-12">
+          <p className="max-w-md mx-auto text-xl md:text-2xl font-serif italic mb-12">
             Empowering citizens and authorities to monitor water resources seamlessly, report incidents quickly, and drive resolution.
           </p>
           
-          <h2 className="font-serif text-[12vw] leading-none tracking-tight">
+          <h2 className="font-serif text-[14vw] leading-none tracking-tight">
             protect water?
           </h2>
         </section>
@@ -107,7 +107,7 @@ export const LandingPage: React.FC = () => {
       {/* ── MINIMAL FOOTER ── */}
       <footer className="border-t-2 border-theme-text px-6 py-8 flex flex-col md:flex-row justify-between items-center gap-6 text-xs font-bold uppercase tracking-widest">
         <div className="flex flex-col items-center md:items-start gap-1">
-          <span className="font-serif text-xl capitalize">AquaWatch</span>
+          <span className="font-serif text-2xl capitalize">AquaWatch</span>
           <span>© {new Date().getFullYear()}</span>
         </div>
 

@@ -1,8 +1,8 @@
 import React from "react";
-import { Shield, UserCheck, Star, ArrowRight, Waves, ArrowLeft } from "lucide-react";
+import { Shield, UserCheck, Star, FlaskConical, ArrowRight, ArrowLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-export type AuthRole = "admin" | "l1" | "superadmin";
+export type AuthRole = "admin" | "l1" | "superadmin" | "sme";
 
 interface RoleSelectionProps {
   onSelectRole: (role: AuthRole) => void;
@@ -17,6 +17,15 @@ const roles = [
     description:
       "Verify, reject, or escalate incident reports for your assigned district.",
     color: "blue",
+  },
+  {
+    role: "sme" as AuthRole,
+    icon: FlaskConical,
+    title: "SME / Authority",
+    badge: "Department Expert",
+    description:
+      "Review routed incident reports and apply your domain expertise to resolve water incidents.",
+    color: "violet",
   },
   {
     role: "admin" as AuthRole,
@@ -43,6 +52,11 @@ const colorMap: Record<string, { bg: string; icon: string; badge: string }> = {
     bg: "bg-blue-50 group-hover:bg-blue-100",
     icon: "text-blue-600",
     badge: "bg-blue-50 text-blue-600 border-blue-100",
+  },
+  violet: {
+    bg: "bg-violet-50 group-hover:bg-violet-100",
+    icon: "text-violet-600",
+    badge: "bg-violet-50 text-violet-600 border-violet-100",
   },
   cyan: {
     bg: "bg-cyan-50 group-hover:bg-cyan-100",
@@ -113,7 +127,7 @@ export const RoleSelection: React.FC<RoleSelectionProps> = ({ onSelectRole }) =>
 
         {/* Cards */}
         <div className="w-full max-w-3xl">
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {roles.map((r) => {
               const c = colorMap[r.color];
               return (

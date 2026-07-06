@@ -10,7 +10,7 @@ import { doc, setDoc, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase/config";
 import * as api from "../utils/api";
 
-export type AppRole = "user" | "admin" | "l1" | "superadmin";
+export type AppRole = "user" | "admin" | "l1" | "superadmin" | "sme";
 
 interface UserData {
   uid: string;
@@ -36,6 +36,14 @@ interface L1Data {
   role: "l1";
 }
 
+interface SMEData {
+  smeId: string;
+  name?: string;
+  state?: string;
+  department?: string;
+  role: "sme";
+}
+
 interface SuperAdminData {
   id: string;
   role: "superadmin";
@@ -43,13 +51,14 @@ interface SuperAdminData {
 
 interface AuthContextType {
   currentUser: User | null;
-  userData: UserData | AdminData | L1Data | SuperAdminData | null;
+  userData: UserData | AdminData | L1Data | SMEData | SuperAdminData | null;
   loading: boolean;
   appRole: AppRole | null;
   signup: (email: string, password: string, state: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   adminLogin: (id: string, password: string) => Promise<void>;
   l1Login: (govtId: string, password: string) => Promise<void>;
+  smeLogin: (smeId: string, password: string) => Promise<void>;
   superAdminLogin: (id: string, password: string) => Promise<void>;
   demoLogin: () => Promise<void>;
   logout: () => Promise<void>;
@@ -95,7 +104,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [userData, setUserData] = useState<UserData | AdminData | L1Data | SuperAdminData | null>(null);
+  const [userData, setUserData] = useState<UserData | AdminData | L1Data | SMEData | SuperAdminData | null>(null);
   const [loading, setLoading] = useState(true);
   const [appRole, setAppRole] = useState<AppRole | null>(null);
   // Track if we have a non-Firebase session (admin, l1, superadmin, or demo user)
@@ -282,6 +291,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  const smeLogin = async (smeId: string, password: string) => {
+    try {
+      isNonFirebaseSession.current = true;
+      const syntheticEmail = `${smeId}@sme.aquawatch.internal`;
+      const { user } = await signInWithEmailAndPassword(auth, syntheticEmail, password);
+      // Fetch SME metadata from the backend (Mongo-backed)
+      let smeMeta: Partial<SMEData> = {};
+      try {
+        const profile = await api.getSMEProfile(smeId);
+        smeMeta = { name: profile.name, state: profile.state, department: profile.department };
+      } catch (_) {}
+      const smeData: SMEData = { smeId, role: "sme", ...smeMeta };
+      setCurrentUser(user);
+      setUserData(smeData);
+      setAppRole("sme");
+      (window as any).__aqRole = "sme";
+    } catch (error) {
+      isNonFirebaseSession.current = false;
+      console.error("SME login error:", error);
+      throw error;
+    }
+  };
+
   const superAdminLogin = async (id: string, password: string) => {
     try {
       await api.superAdminLogin(id, password);
@@ -383,6 +415,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             const l1Data: L1Data = { govtId, role: "l1" };
             setUserData(l1Data);
             setAppRole("l1");
+          } else if (user.email?.endsWith("@sme.aquawatch.internal")) {
+            const smeId = user.email.replace("@sme.aquawatch.internal", "");
+            const smeData: SMEData = { smeId, role: "sme" };
+            setUserData(smeData);
+            setAppRole("sme");
           } else {
             const userDocRef = doc(db, "users", user.uid);
             const userDocSnap = await getDoc(userDocRef);
@@ -415,6 +452,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     login,
     adminLogin,
     l1Login,
+    smeLogin,
     superAdminLogin,
     demoLogin,
     logout,

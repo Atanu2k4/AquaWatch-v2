@@ -147,6 +147,33 @@ export const updateL1Status = (adminId: string, govtId: string, adminPassword: s
     { status }
   );
 
+export const updateReportStatusL1 = (
+  govtId: string,
+  reportId: string,
+  idToken: string,
+  status: "verified" | "rejected" | "escalated",
+  note?: string
+) =>
+  request<{ message: string; status: string }>(
+    "POST",
+    `/l1/${encodeURIComponent(govtId)}/reports/${encodeURIComponent(reportId)}/status`,
+    { id_token: idToken, status, note }
+  );
+
+export const updateReportStatusAdmin = (
+  adminId: string,
+  adminPassword: string,
+  reportId: string,
+  status: "assigned" | "resolved",
+  departments?: string[],
+  note?: string
+) =>
+  request<{ message: string; status: string }>(
+    "POST",
+    `/admin/${encodeURIComponent(adminId)}/reports/${encodeURIComponent(reportId)}/status`,
+    { admin_password: adminPassword, status, departments, note }
+  );
+
 export interface IncidentReportResponse {
   id: string;
   imageUrl: string;
@@ -186,3 +213,77 @@ export const uploadStateCsv = async (adminId: string, adminPassword: string, fil
   if (!res.ok) throw new Error((data as any)?.detail ?? res.statusText);
   return data as UploadCsvResponse;
 };
+
+// ── SME / Authority endpoints ─────────────────────────────────────────────────
+
+export interface SMERegisterPayload {
+  sme_id: string;
+  name: string;
+  password: string;
+  state: string;
+  department: string;
+}
+
+export const registerSME = (payload: SMERegisterPayload) =>
+  request<{ message: string; status: string }>("POST", "/sme-authority/register", payload);
+
+export interface SMEProfile {
+  sme_id: string;
+  name: string;
+  state: string;
+  department: string;
+  status: string;
+}
+
+export const getSMEProfile = (smeId: string) =>
+  request<SMEProfile>("GET", `/sme-authority/${encodeURIComponent(smeId)}`);
+
+export const approveSME = (smeId: string, adminId: string, adminPassword: string) =>
+  request<{ message: string; status: string }>(
+    "POST",
+    `/sme-authority/${smeId}/approve?admin_id=${encodeURIComponent(adminId)}&admin_password=${encodeURIComponent(adminPassword)}`
+  );
+
+export const getPendingSME = (adminId: string, adminPassword: string) =>
+  request<{ pending: SMEProfile[] }>(
+    "GET",
+    `/admin/${encodeURIComponent(adminId)}/pending-sme?admin_password=${encodeURIComponent(adminPassword)}`
+  );
+
+export const getAllSME = (adminId: string, adminPassword: string) =>
+  request<{ authorities: SMEProfile[] }>(
+    "GET",
+    `/admin/${encodeURIComponent(adminId)}/all-sme?admin_password=${encodeURIComponent(adminPassword)}`
+  );
+
+export const updateSMEStatus = (adminId: string, smeId: string, adminPassword: string, status: string) =>
+  request<{ message: string; status: string }>(
+    "POST",
+    `/admin/${encodeURIComponent(adminId)}/sme-status/${encodeURIComponent(smeId)}?admin_password=${encodeURIComponent(adminPassword)}`,
+    { status }
+  );
+
+export interface SMELoginResponse {
+  ok: boolean;
+  role: "sme";
+  sme_id: string;
+  name: string;
+  state: string;
+  department: string;
+}
+
+export const smeLogin = (smeId: string, password: string) =>
+  request<SMELoginResponse>("POST", "/sme/login", { sme_id: smeId, password });
+
+export const updateReportStatusSME = (
+  smeId: string,
+  reportId: string,
+  idToken: string,
+  status: "in_progress" | "resolved",
+  note?: string
+) =>
+  request<{ message: string; status: string }>(
+    "POST",
+    `/sme/${encodeURIComponent(smeId)}/reports/${encodeURIComponent(reportId)}/status`,
+    { id_token: idToken, status, note }
+  );

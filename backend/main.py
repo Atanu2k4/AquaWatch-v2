@@ -34,7 +34,7 @@ from pymongo import MongoClient, UpdateOne
 from PIL import Image, ExifTags
 import io
 
-from schemas import L1AuthorityStatus, categorize_sensor_reading, normalize_to_pct
+from schemas import L1AuthorityStatus, SMEAuthorityStatus, categorize_sensor_reading, normalize_to_pct
 
 # ---------- Config ----------
 CSV_FILE = "data/sensor_data.csv"
@@ -112,6 +112,7 @@ except Exception as e:
 l1_authority_col = mongo_db["L1Authority"] if mongo_client else None
 incident_images_col = mongo_db["incident_images"] if mongo_client else None   # citizen report photos (Binary), avoids Firebase Storage billing
 station_ranges_col = mongo_db["station_ranges"] if mongo_client else None   # populated by import_csv.py
+sme_authority_col = mongo_db["SMEAuthority"] if mongo_client else None
 
 
 # ---------- Helpers ----------
@@ -735,6 +736,111 @@ async def create_incident_report(
     return created
 
 
+# ---------- Incident report status workflow ----------
+# Single source of truth for legal transitions.
+VALID_REPORT_TRANSITIONS = {
+    "pending":     {"verified", "rejected", "escalated"},   # L1 actions
+    "verified":    {"assigned"},                              # admin actions
+    "escalated":   {"assigned"},
+    "assigned":    {"in_progress", "resolved"},               # SME → in_progress, admin → resolved
+    "in_progress": {"resolved"},                             # SME → resolved
+}
+
+
+def _append_report_history(report_ref, status: str, actor_role: str, actor_id: str, note: str | None = None):
+    entry = {"status": status, "actor_role": actor_role, "actor_id": actor_id, "at": datetime.utcnow()}
+    if note:
+        entry["note"] = note
+    report_ref.update({
+        "status": status,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+        "history": firestore.ArrayUnion([entry]),
+    })
+
+
+class L1ReportStatusUpdate(BaseModel):
+    id_token: str
+    status: str
+    note: str | None = None
+
+
+@app.post("/l1/{govt_id}/reports/{report_id}/status")
+def l1_update_report_status(govt_id: str, report_id: str, req: L1ReportStatusUpdate):
+    if req.status not in {"verified", "rejected", "escalated"}:
+        raise HTTPException(status_code=400, detail="Invalid status for an L1 action")
+
+    try:
+        decoded = firebase_auth.verify_id_token(req.id_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    if l1_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    l1 = l1_authority_col.find_one({"govt_id": govt_id})
+    if not l1 or l1.get("status") != L1AuthorityStatus.APPROVED.value:
+        raise HTTPException(status_code=403, detail="Not an approved L1 authority")
+    if decoded.get("email") != _l1_synthetic_email(govt_id):
+        raise HTTPException(status_code=403, detail="Session does not belong to this authority")
+
+    report_ref = db.collection("IncidentReports").document(report_id)
+    snap = report_ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report = snap.to_dict()
+
+    assigned_loc = l1.get("assigned_location", {})
+    report_loc = report.get("location", {})
+    if assigned_loc.get("district") and report_loc.get("district") != assigned_loc["district"]:
+        raise HTTPException(status_code=403, detail="Report is outside your assigned district")
+
+    current = report.get("status")
+    if req.status not in VALID_REPORT_TRANSITIONS.get(current, set()):
+        raise HTTPException(status_code=409, detail=f"Cannot move report from {current} to {req.status}")
+
+    _append_report_history(report_ref, req.status, "l1", govt_id, req.note)
+    return {"message": f"Report {req.status}", "status": req.status}
+
+
+class AdminReportStatusUpdate(BaseModel):
+    admin_password: str
+    status: str
+    departments: list[str] | None = None
+    note: str | None = None
+
+
+@app.post("/admin/{admin_id}/reports/{report_id}/status")
+def admin_update_report_status(admin_id: str, report_id: str, req: AdminReportStatusUpdate):
+    if ADMIN_CREDENTIALS.get(admin_id) != req.admin_password:
+        raise HTTPException(status_code=403, detail="Invalid admin credentials")
+    if req.status not in {"assigned", "resolved"}:
+        raise HTTPException(status_code=400, detail="Invalid status for an admin action")
+
+    report_ref = db.collection("IncidentReports").document(report_id)
+    snap = report_ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report = snap.to_dict()
+
+    admin_state = _state_for_admin(admin_id)
+    if admin_state and report.get("location", {}).get("state") != admin_state:
+        raise HTTPException(status_code=403, detail="Report belongs to a different state")
+
+    current = report.get("status")
+    if req.status not in VALID_REPORT_TRANSITIONS.get(current, set()):
+        raise HTTPException(status_code=409, detail=f"Cannot move report from {current} to {req.status}")
+
+    extra = {}
+    if req.status == "assigned":
+        if not req.departments:
+            raise HTTPException(status_code=400, detail="At least one department is required")
+        extra["assignedDepartments"] = req.departments
+    if extra:
+        report_ref.update(extra)
+
+    _append_report_history(report_ref, req.status, "admin", admin_id, req.note)
+    return {"message": f"Report {req.status}", "status": req.status}
+
+
 # ---------- Auth: L1 Authority / Admin / Super Admin ----------
 # L1 Authority credentials live in Firebase Auth itself (synthetic email,
 # account created `disabled` until Admin approval) rather than a second
@@ -994,6 +1100,415 @@ async def admin_upload_csv(admin_id: str, admin_password: str = Form(...), file:
         "rows_written": len(valid_records),
         "skipped_other_state": skipped_other_state,
     }
+
+
+# =====================================================================
+# SME / Authority endpoints
+# =====================================================================
+
+def _sme_synthetic_email(sme_id: str) -> str:
+    return f"{sme_id}@sme.aquawatch.internal"
+
+
+class SMERegisterRequest(BaseModel):
+    sme_id: str
+    name: str
+    password: str
+    state: str
+    department: str
+
+
+@app.post("/sme-authority/register")
+def register_sme_authority(req: SMERegisterRequest):
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    if sme_authority_col.find_one({"sme_id": req.sme_id}):
+        raise HTTPException(status_code=409, detail="sme_id already registered")
+
+    try:
+        firebase_auth.create_user(
+            email=_sme_synthetic_email(req.sme_id),
+            password=req.password,
+            disabled=True,
+        )
+    except firebase_auth.EmailAlreadyExistsError:
+        raise HTTPException(status_code=409, detail="sme_id already registered")
+
+    sme_authority_col.insert_one({
+        "sme_id": req.sme_id,
+        "name": req.name,
+        "state": req.state,
+        "department": req.department,
+        "status": SMEAuthorityStatus.PENDING.value,
+        "approved_by": None,
+        "created_at": datetime.utcnow(),
+    })
+    return {"message": "Registered. Awaiting admin approval.", "status": "pending"}
+
+
+@app.get("/sme-authority/{sme_id}")
+def get_sme_authority(sme_id: str):
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    record = sme_authority_col.find_one({"sme_id": sme_id})
+    if not record:
+        raise HTTPException(status_code=404, detail="SME authority not found")
+    record["_id"] = str(record["_id"])
+    return record
+
+
+@app.post("/sme-authority/{sme_id}/approve")
+def approve_sme_authority(sme_id: str, admin_id: str, admin_password: str):
+    if ADMIN_CREDENTIALS.get(admin_id) != admin_password:
+        raise HTTPException(status_code=403, detail="Invalid admin credentials")
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+
+    record = sme_authority_col.find_one({"sme_id": sme_id})
+    if not record:
+        raise HTTPException(status_code=404, detail="SME authority not found")
+
+    admin_state = _state_for_admin(admin_id)
+    if admin_state and record.get("state") != admin_state:
+        raise HTTPException(status_code=403, detail="This authority belongs to a different state")
+
+    user = firebase_auth.get_user_by_email(_sme_synthetic_email(sme_id))
+    firebase_auth.update_user(user.uid, disabled=False)
+
+    sme_authority_col.update_one(
+        {"sme_id": sme_id},
+        {"$set": {"status": SMEAuthorityStatus.APPROVED.value, "approved_by": admin_id}},
+    )
+    return {"message": "Approved", "status": "approved"}
+
+
+@app.get("/admin/{admin_id}/pending-sme")
+def get_pending_sme_authorities(admin_id: str, admin_password: str):
+    if ADMIN_CREDENTIALS.get(admin_id) != admin_password:
+        raise HTTPException(status_code=403, detail="Invalid admin credentials")
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    query = {"status": SMEAuthorityStatus.PENDING.value}
+    admin_state = _state_for_admin(admin_id)
+    if admin_state:
+        query["state"] = admin_state
+    cursor = sme_authority_col.find(query)
+    results = []
+    for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return {"pending": results}
+
+
+@app.get("/admin/{admin_id}/all-sme")
+def get_all_sme_authorities(admin_id: str, admin_password: str):
+    if ADMIN_CREDENTIALS.get(admin_id) != admin_password:
+        raise HTTPException(status_code=403, detail="Invalid admin credentials")
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    query = {}
+    admin_state = _state_for_admin(admin_id)
+    if admin_state:
+        query["state"] = admin_state
+    cursor = sme_authority_col.find(query)
+    results = []
+    for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return {"authorities": results}
+
+
+@app.post("/admin/{admin_id}/sme-status/{sme_id}")
+def update_sme_status(admin_id: str, sme_id: str, admin_password: str, req: UpdateStatusRequest):
+    if ADMIN_CREDENTIALS.get(admin_id) != admin_password:
+        raise HTTPException(status_code=403, detail="Invalid admin credentials")
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    record = sme_authority_col.find_one({"sme_id": sme_id})
+    if not record:
+        raise HTTPException(status_code=404, detail="SME authority not found")
+    admin_state = _state_for_admin(admin_id)
+    if admin_state and record.get("state") != admin_state:
+        raise HTTPException(status_code=403, detail="This authority belongs to a different state")
+    sme_authority_col.update_one(
+        {"sme_id": sme_id},
+        {"$set": {"status": req.status}}
+    )
+    return {"message": f"Status updated to {req.status}", "status": req.status}
+
+
+class SMELoginRequest(BaseModel):
+    sme_id: str
+    password: str
+
+
+@app.post("/sme/login")
+def sme_login(req: SMELoginRequest):
+    """Validates SME credentials via Firebase and returns the SME profile."""
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    record = sme_authority_col.find_one({"sme_id": req.sme_id})
+    if not record or record.get("status") != SMEAuthorityStatus.APPROVED.value:
+        raise HTTPException(status_code=403, detail="Not an approved SME authority")
+    record["_id"] = str(record["_id"])
+    return {"ok": True, "role": "sme", "sme_id": req.sme_id,
+            "name": record.get("name"), "state": record.get("state"),
+            "department": record.get("department")}
+
+
+class SMEReportStatusUpdate(BaseModel):
+    id_token: str
+    status: str
+    note: str | None = None
+
+
+@app.post("/sme/{sme_id}/reports/{report_id}/status")
+def sme_update_report_status(sme_id: str, report_id: str, req: SMEReportStatusUpdate):
+    """SME can move a report from `assigned` → `in_progress` or
+    `in_progress` → `resolved`. The report must be assigned to the SME's
+    department to be actionable."""
+    if req.status not in {"in_progress", "resolved"}:
+        raise HTTPException(status_code=400, detail="Invalid status for an SME action")
+
+    try:
+        decoded = firebase_auth.verify_id_token(req.id_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    sme = sme_authority_col.find_one({"sme_id": sme_id})
+    if not sme or sme.get("status") != SMEAuthorityStatus.APPROVED.value:
+        raise HTTPException(status_code=403, detail="Not an approved SME authority")
+    if decoded.get("email") != _sme_synthetic_email(sme_id):
+        raise HTTPException(status_code=403, detail="Session does not belong to this SME")
+
+    report_ref = db.collection("IncidentReports").document(report_id)
+    snap = report_ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report = snap.to_dict()
+
+    # Confirm the report is assigned to this SME's department
+    assigned_depts = report.get("assignedDepartments", [])
+    if sme["department"] not in assigned_depts:
+        raise HTTPException(status_code=403, detail="This report is not assigned to your department")
+
+    # Confirm the report is in the SME's state
+    if report.get("location", {}).get("state") != sme["state"]:
+        raise HTTPException(status_code=403, detail="Report belongs to a different state")
+
+    current = report.get("status")
+    if req.status not in VALID_REPORT_TRANSITIONS.get(current, set()):
+        raise HTTPException(status_code=409, detail=f"Cannot move report from {current} to {req.status}")
+
+    _append_report_history(report_ref, req.status, "sme", sme_id, req.note)
+    return {"message": f"Report {req.status}", "status": req.status}
+
+# ---------- Run ----------
+
+# =====================================================================
+# SME / Authority endpoints
+# =====================================================================
+
+def _sme_synthetic_email(sme_id: str) -> str:
+    return f"{sme_id}@sme.aquawatch.internal"
+
+
+class SMERegisterRequest(BaseModel):
+    sme_id: str
+    name: str
+    password: str
+    state: str
+    department: str
+
+
+@app.post("/sme-authority/register")
+def register_sme_authority(req: SMERegisterRequest):
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    if sme_authority_col.find_one({"sme_id": req.sme_id}):
+        raise HTTPException(status_code=409, detail="sme_id already registered")
+
+    try:
+        firebase_auth.create_user(
+            email=_sme_synthetic_email(req.sme_id),
+            password=req.password,
+            disabled=True,
+        )
+    except firebase_auth.EmailAlreadyExistsError:
+        raise HTTPException(status_code=409, detail="sme_id already registered")
+
+    sme_authority_col.insert_one({
+        "sme_id": req.sme_id,
+        "name": req.name,
+        "state": req.state,
+        "department": req.department,
+        "status": SMEAuthorityStatus.PENDING.value,
+        "approved_by": None,
+        "created_at": datetime.utcnow(),
+    })
+    return {"message": "Registered. Awaiting admin approval.", "status": "pending"}
+
+
+@app.get("/sme-authority/{sme_id}")
+def get_sme_authority(sme_id: str):
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    record = sme_authority_col.find_one({"sme_id": sme_id})
+    if not record:
+        raise HTTPException(status_code=404, detail="SME authority not found")
+    record["_id"] = str(record["_id"])
+    return record
+
+
+@app.post("/sme-authority/{sme_id}/approve")
+def approve_sme_authority(sme_id: str, admin_id: str, admin_password: str):
+    if ADMIN_CREDENTIALS.get(admin_id) != admin_password:
+        raise HTTPException(status_code=403, detail="Invalid admin credentials")
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+
+    record = sme_authority_col.find_one({"sme_id": sme_id})
+    if not record:
+        raise HTTPException(status_code=404, detail="SME authority not found")
+
+    admin_state = _state_for_admin(admin_id)
+    if admin_state and record.get("state") != admin_state:
+        raise HTTPException(status_code=403, detail="This authority belongs to a different state")
+
+    user = firebase_auth.get_user_by_email(_sme_synthetic_email(sme_id))
+    firebase_auth.update_user(user.uid, disabled=False)
+
+    sme_authority_col.update_one(
+        {"sme_id": sme_id},
+        {"$set": {"status": SMEAuthorityStatus.APPROVED.value, "approved_by": admin_id}},
+    )
+    return {"message": "Approved", "status": "approved"}
+
+
+@app.get("/admin/{admin_id}/pending-sme")
+def get_pending_sme_authorities(admin_id: str, admin_password: str):
+    if ADMIN_CREDENTIALS.get(admin_id) != admin_password:
+        raise HTTPException(status_code=403, detail="Invalid admin credentials")
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    query = {"status": SMEAuthorityStatus.PENDING.value}
+    admin_state = _state_for_admin(admin_id)
+    if admin_state:
+        query["state"] = admin_state
+    cursor = sme_authority_col.find(query)
+    results = []
+    for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return {"pending": results}
+
+
+@app.get("/admin/{admin_id}/all-sme")
+def get_all_sme_authorities(admin_id: str, admin_password: str):
+    if ADMIN_CREDENTIALS.get(admin_id) != admin_password:
+        raise HTTPException(status_code=403, detail="Invalid admin credentials")
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    query = {}
+    admin_state = _state_for_admin(admin_id)
+    if admin_state:
+        query["state"] = admin_state
+    cursor = sme_authority_col.find(query)
+    results = []
+    for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        results.append(doc)
+    return {"authorities": results}
+
+
+@app.post("/admin/{admin_id}/sme-status/{sme_id}")
+def update_sme_status(admin_id: str, sme_id: str, admin_password: str, req: UpdateStatusRequest):
+    if ADMIN_CREDENTIALS.get(admin_id) != admin_password:
+        raise HTTPException(status_code=403, detail="Invalid admin credentials")
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    record = sme_authority_col.find_one({"sme_id": sme_id})
+    if not record:
+        raise HTTPException(status_code=404, detail="SME authority not found")
+    admin_state = _state_for_admin(admin_id)
+    if admin_state and record.get("state") != admin_state:
+        raise HTTPException(status_code=403, detail="This authority belongs to a different state")
+    sme_authority_col.update_one(
+        {"sme_id": sme_id},
+        {"$set": {"status": req.status}}
+    )
+    return {"message": f"Status updated to {req.status}", "status": req.status}
+
+
+class SMELoginRequest(BaseModel):
+    sme_id: str
+    password: str
+
+
+@app.post("/sme/login")
+def sme_login(req: SMELoginRequest):
+    """Validates SME credentials via Firebase and returns the SME profile."""
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    record = sme_authority_col.find_one({"sme_id": req.sme_id})
+    if not record or record.get("status") != SMEAuthorityStatus.APPROVED.value:
+        raise HTTPException(status_code=403, detail="Not an approved SME authority")
+    record["_id"] = str(record["_id"])
+    return {"ok": True, "role": "sme", "sme_id": req.sme_id,
+            "name": record.get("name"), "state": record.get("state"),
+            "department": record.get("department")}
+
+
+class SMEReportStatusUpdate(BaseModel):
+    id_token: str
+    status: str
+    note: str | None = None
+
+
+@app.post("/sme/{sme_id}/reports/{report_id}/status")
+def sme_update_report_status(sme_id: str, report_id: str, req: SMEReportStatusUpdate):
+    """SME can move a report from `assigned` → `in_progress` or
+    `in_progress` → `resolved`. The report must be assigned to the SME's
+    department to be actionable."""
+    if req.status not in {"in_progress", "resolved"}:
+        raise HTTPException(status_code=400, detail="Invalid status for an SME action")
+
+    try:
+        decoded = firebase_auth.verify_id_token(req.id_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+    if sme_authority_col is None:
+        raise HTTPException(status_code=503, detail="MongoDB not connected")
+    sme = sme_authority_col.find_one({"sme_id": sme_id})
+    if not sme or sme.get("status") != SMEAuthorityStatus.APPROVED.value:
+        raise HTTPException(status_code=403, detail="Not an approved SME authority")
+    if decoded.get("email") != _sme_synthetic_email(sme_id):
+        raise HTTPException(status_code=403, detail="Session does not belong to this SME")
+
+    report_ref = db.collection("IncidentReports").document(report_id)
+    snap = report_ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report = snap.to_dict()
+
+    # Confirm the report is assigned to this SME's department
+    assigned_depts = report.get("assignedDepartments", [])
+    if sme["department"] not in assigned_depts:
+        raise HTTPException(status_code=403, detail="This report is not assigned to your department")
+
+    # Confirm the report is in the SME's state
+    if report.get("location", {}).get("state") != sme["state"]:
+        raise HTTPException(status_code=403, detail="Report belongs to a different state")
+
+    current = report.get("status")
+    if req.status not in VALID_REPORT_TRANSITIONS.get(current, set()):
+        raise HTTPException(status_code=409, detail=f"Cannot move report from {current} to {req.status}")
+
+    _append_report_history(report_ref, req.status, "sme", sme_id, req.note)
+    return {"message": f"Report {req.status}", "status": req.status}
 
 
 # ---------- Run ----------

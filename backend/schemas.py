@@ -51,6 +51,12 @@ class L1AuthorityStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class SMEAuthorityStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class AssignedLocation(BaseModel):
     state: str
     district: str
@@ -62,6 +68,21 @@ class L1Authority(BaseModel):
     password_hash: str
     assigned_location: AssignedLocation
     status: L1AuthorityStatus = L1AuthorityStatus.PENDING
+    approved_by: Optional[str] = None  # Admin.admin_id
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SMEAuthority(BaseModel):
+    """Subject-Matter Expert / department authority. Assigned to a specific
+    department (e.g. 'Water Supply Board') within a state. Receives incident
+    reports routed by the State Admin and can progress them from `assigned`
+    through `in_progress` to `resolved`."""
+    sme_id: str
+    name: str
+    password_hash: str
+    state: str
+    department: str         # one of the DEPARTMENTS list (e.g. 'Water Supply Board')
+    status: SMEAuthorityStatus = SMEAuthorityStatus.PENDING
     approved_by: Optional[str] = None  # Admin.admin_id
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

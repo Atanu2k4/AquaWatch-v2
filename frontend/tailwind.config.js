@@ -30,7 +30,7 @@ export default {
         },
       },
       fontFamily: {
-        sans: ["'Oswald'", "sans-serif"],
+        sans: ["'Inter'", "sans-serif"],
         serif: ["'Quintessential'", "cursive"],
       },
       fontSize: {

@@ -19,6 +19,7 @@ import { DevTestPage } from "./pages/DevTestPage";
 import { IncidentReportPage } from "./pages/IncidentReportPage";
 import { L1Dashboard } from "./pages/L1Dashboard";
 import { SuperAdminDashboard } from "./pages/SuperAdminDashboard";
+import { SMEDashboard } from "./pages/SMEDashboard";
 
 // ── Auth page wrapper — redirects to the right dashboard after login ──────────
 const AuthPage: React.FC = () => {
@@ -29,6 +30,7 @@ const AuthPage: React.FC = () => {
   if (appRole === "superadmin") return <Navigate to="/superadmin" replace />;
   if (appRole === "l1") return <Navigate to="/l1" replace />;
   if (appRole === "admin") return <Navigate to="/admin" replace />;
+  if (appRole === "sme") return <Navigate to="/sme" replace />;
   if (appRole === "user") return <Navigate to="/dashboard" replace />;
 
   const handleSuccess = () => {
@@ -38,6 +40,7 @@ const AuthPage: React.FC = () => {
       if (role === "superadmin") navigate("/superadmin", { replace: true });
       else if (role === "l1") navigate("/l1", { replace: true });
       else if (role === "admin") navigate("/admin", { replace: true });
+      else if (role === "sme") navigate("/sme", { replace: true });
       else navigate("/dashboard", { replace: true });
     }, 50);
   };
@@ -92,6 +95,16 @@ const AppRoutes: React.FC = () => {
         element={
           <RequireRole role="l1">
             <L1Dashboard />
+          </RequireRole>
+        }
+      />
+
+      {/* ── SME / Authority (requires sme role) ───────────────────── */}
+      <Route
+        path="/sme"
+        element={
+          <RequireRole role="sme">
+            <SMEDashboard />
           </RequireRole>
         }
       />

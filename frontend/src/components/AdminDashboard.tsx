@@ -1,9 +1,9 @@
 // src/components/AdminDashboard.tsx
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../firebase/config";
-import { Shield, UserCheck, CheckCircle, XCircle, LogOut, RefreshCw, AlertTriangle, Waves, Building2, Send, MapPin, Clock, Droplets, Users, UploadCloud } from "lucide-react";
+import { Shield, UserCheck, CheckCircle, XCircle, LogOut, RefreshCw, AlertTriangle, Waves, Building2, Send, MapPin, Clock, Droplets, Users, UploadCloud, History as HistoryIcon, ChevronDown, FlaskConical } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import * as api from "../utils/api";
 import { type IncidentReport, type ReportStatus, type SensorCategory } from "../components/IncidentCard";
@@ -32,16 +32,21 @@ const AdminDashboard: React.FC = () => {
   const adminState = adminId ? stateForAdmin(adminId) : null;
 
   const [pendingAuthorities, setPendingAuthorities] = useState<api.PendingL1[]>([]);
+  const [pendingSMEs, setPendingSMEs] = useState<api.SMEProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [approvalPassword, setApprovalPassword] = useState("");
+  // Already known from login (in-memory only, not persisted across reload — see AuthContext) — no need to ask again.
+  const [approvalPassword, setApprovalPassword] = useState((userData as any)?.password ?? "");
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [approvingSMEId, setApprovingSMEId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const [reports, setReports] = useState<IncidentReport[]>([]);
   const [loadingReports, setLoadingReports] = useState(true);
   const [departmentSelections, setDepartmentSelections] = useState<Record<string, string[]>>({});
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [reportNotes, setReportNotes] = useState<Record<string, string>>({});
+  const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>({});
 
   const [uploadPassword, setUploadPassword] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -59,9 +64,10 @@ const AdminDashboard: React.FC = () => {
     setLoadingReports(true);
     try {
       const reportsRef = collection(db, "IncidentReports");
+      const statuses = ["verified", "escalated", "assigned", "in_progress"];
       const q = adminState
-        ? query(reportsRef, where("status", "in", ["verified", "escalated"]), where("location.state", "==", adminState))
-        : query(reportsRef, where("status", "in", ["verified", "escalated"]));
+        ? query(reportsRef, where("status", "in", statuses), where("location.state", "==", adminState))
+        : query(reportsRef, where("status", "in", statuses));
       const snap = await getDocs(q);
       const data: IncidentReport[] = snap.docs.map(d => {
         const r = d.data();
@@ -77,6 +83,7 @@ const AdminDashboard: React.FC = () => {
           createdAt: r.createdAt?.toDate?.() ?? new Date(),
           aiAnalysis: r.aiAnalysis ?? null,
           assignedDepartments: r.assignedDepartments ?? [],
+          history: (r.history ?? []).map((h: any) => ({ ...h, at: h.at?.toDate?.() ?? new Date() })),
         };
       });
       data.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -91,6 +98,8 @@ const AdminDashboard: React.FC = () => {
   useEffect(() => {
     if (authLoading) return;   // wait for userData restore on reload before querying — else id/state isn't resolved yet
     loadReports();
+    if (approvalPassword) loadPending(approvalPassword);
+    else setLoading(false);
   }, [authLoading, adminId, adminState]);
 
   const loadPending = async (password: string) => {
@@ -100,8 +109,12 @@ const AdminDashboard: React.FC = () => {
     }
     setLoading(true);
     try {
-      const res = await api.getPendingL1(adminId, password);
-      setPendingAuthorities(res.pending || []);
+      const [l1Res, smeRes] = await Promise.all([
+        api.getPendingL1(adminId, password),
+        api.getPendingSME(adminId, password),
+      ]);
+      setPendingAuthorities(l1Res.pending || []);
+      setPendingSMEs(smeRes.pending || []);
       setMessage(null);
     } catch (err: any) {
       setMessage({ ok: false, text: "Failed to load pending authorities. Invalid password?" });
@@ -118,12 +131,29 @@ const AdminDashboard: React.FC = () => {
     setApprovingId(govtId);
     try {
       await api.approveL1(govtId, adminId, approvalPassword);
-      setMessage({ ok: true, text: `Successfully approved ${govtId}.` });
+      setMessage({ ok: true, text: `Successfully approved L1 officer ${govtId}.` });
       setPendingAuthorities(prev => prev.filter(a => a.govt_id !== govtId));
     } catch (err: any) {
       setMessage({ ok: false, text: `Approval failed: ${err.message}` });
     } finally {
       setApprovingId(null);
+    }
+  };
+
+  const handleApproveSME = async (smeId: string) => {
+    if (!approvalPassword) {
+      setMessage({ ok: false, text: "Admin password is required to approve." });
+      return;
+    }
+    setApprovingSMEId(smeId);
+    try {
+      await api.approveSME(smeId, adminId, approvalPassword);
+      setMessage({ ok: true, text: `Successfully approved SME ${smeId}.` });
+      setPendingSMEs(prev => prev.filter(s => s.sme_id !== smeId));
+    } catch (err: any) {
+      setMessage({ ok: false, text: `SME approval failed: ${err.message}` });
+    } finally {
+      setApprovingSMEId(null);
     }
   };
 
@@ -144,16 +174,21 @@ const AdminDashboard: React.FC = () => {
       setMessage({ ok: false, text: "Please select at least one department." });
       return;
     }
+    if (!approvalPassword) {
+      setMessage({ ok: false, text: "Enter your admin password above (L1 Authority Approvals section) first." });
+      return;
+    }
     setAssigningId(reportId);
     try {
-      await updateDoc(doc(db, "IncidentReports", reportId), {
-        status: "assigned",
-        assignedDepartments: depts,
-        updatedAt: serverTimestamp()
-      });
-      setReports(prev => prev.filter(r => r.id !== reportId));
+      await api.updateReportStatusAdmin(adminId, approvalPassword, reportId, "assigned", depts, reportNotes[reportId]?.trim() || undefined);
+      setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: "assigned", assignedDepartments: depts } : r));
       setMessage({ ok: true, text: "Report successfully assigned to departments." });
       setDepartmentSelections(prev => {
+        const next = { ...prev };
+        delete next[reportId];
+        return next;
+      });
+      setReportNotes(prev => {
         const next = { ...prev };
         delete next[reportId];
         return next;
@@ -162,6 +197,30 @@ const AdminDashboard: React.FC = () => {
       setMessage({ ok: false, text: `Failed to assign report: ${err.message}` });
     } finally {
       setAssigningId(null);
+    }
+  };
+
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+
+  const handleResolve = async (reportId: string) => {
+    if (!approvalPassword) {
+      setMessage({ ok: false, text: "Enter your admin password above (L1 Authority Approvals section) first." });
+      return;
+    }
+    setResolvingId(reportId);
+    try {
+      await api.updateReportStatusAdmin(adminId, approvalPassword, reportId, "resolved", undefined, reportNotes[reportId]?.trim() || undefined);
+      setReports(prev => prev.filter(r => r.id !== reportId));
+      setMessage({ ok: true, text: "Report marked resolved." });
+      setReportNotes(prev => {
+        const next = { ...prev };
+        delete next[reportId];
+        return next;
+      });
+    } catch (err: any) {
+      setMessage({ ok: false, text: `Failed to resolve report: ${err.message}` });
+    } finally {
+      setResolvingId(null);
     }
   };
 
@@ -273,26 +332,29 @@ const AdminDashboard: React.FC = () => {
             L1 Authority Approvals
           </h2>
           
-          <div className="p-6 mb-4 bg-white/60 backdrop-blur-md border border-white/60 shadow-lg rounded-2xl">
-            <p className="mb-4 text-[14px] text-slate-500">
-              Please enter your admin password to view and approve pending L1 authorities.
-            </p>
-            <div className="flex flex-col max-w-md gap-3 sm:flex-row">
-              <input
-                type="password"
-                placeholder="Admin Password"
-                value={approvalPassword}
-                onChange={(e) => setApprovalPassword(e.target.value)}
-                className="flex-1 rounded-lg border border-slate-200 bg-theme-base px-4 py-2 text-[14px] outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
-              />
-              <button
-                onClick={() => loadPending(approvalPassword)}
-                className="rounded-lg bg-slate-900 px-6 py-2 text-[14px] font-semibold text-white transition-colors hover:bg-slate-800"
-              >
-                View Pending
-              </button>
+          {!approvalPassword && (
+            <div className="p-6 mb-4 bg-white/60 backdrop-blur-md border border-white/60 shadow-lg rounded-2xl">
+              <p className="mb-4 text-[14px] text-slate-500">
+                Session password expired after reload — enter it again to view and approve pending L1 authorities.
+              </p>
+              <div className="flex flex-col max-w-md gap-3 sm:flex-row">
+                <input
+                  type="password"
+                  placeholder="Admin Password"
+                  value={approvalPassword}
+                  onChange={(e) => setApprovalPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && loadPending(approvalPassword)}
+                  className="flex-1 rounded-lg border border-slate-200 bg-theme-base px-4 py-2 text-[14px] outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
+                />
+                <button
+                  onClick={() => loadPending(approvalPassword)}
+                  className="rounded-lg bg-slate-900 px-6 py-2 text-[14px] font-semibold text-white transition-colors hover:bg-slate-800"
+                >
+                  View Pending
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {approvalPassword && !loading && (
             <div className="overflow-hidden bg-white/60 backdrop-blur-md border border-white/60 shadow-lg rounded-2xl">
@@ -340,6 +402,66 @@ const AdminDashboard: React.FC = () => {
                           <>
                             <CheckCircle className="h-3.5 w-3.5" /> Approve
                           </>
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* --- SECTION: SME / Authority Approvals --- */}
+        <div className="mb-10">
+          <h2 className="mb-4 text-[18px] font-bold text-slate-900 flex items-center gap-2">
+            <FlaskConical className="w-5 h-5 text-violet-600" />
+            SME / Authority Approvals
+          </h2>
+
+          {approvalPassword && !loading && (
+            <div className="overflow-hidden bg-white/60 backdrop-blur-md border border-white/60 shadow-lg rounded-2xl">
+              <div className="px-6 py-4 border-b border-white/50 bg-white/40">
+                <h3 className="text-[14px] font-semibold text-slate-900">
+                  Pending SME Approvals ({pendingSMEs.length})
+                </h3>
+              </div>
+              {pendingSMEs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-8 text-center">
+                  <div className="flex items-center justify-center w-10 h-10 mb-3 rounded-full bg-slate-100">
+                    <CheckCircle className="w-5 h-5 text-slate-400" />
+                  </div>
+                  <p className="text-[14px] font-medium text-slate-900">All caught up!</p>
+                  <p className="text-[13px] text-slate-500">No pending SME authorities found.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {pendingSMEs.map((sme) => (
+                    <div key={sme.sme_id} className="flex flex-col justify-between gap-4 p-5 transition-colors sm:flex-row sm:items-center hover:bg-theme-base/50">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="text-[15px] font-semibold text-slate-900">{sme.name}</h4>
+                          <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-violet-700">Pending</span>
+                        </div>
+                        <p className="text-[13px] text-slate-500 mb-2">SME ID: <span className="font-medium text-slate-700">{sme.sme_id}</span></p>
+                        <div className="flex gap-2 flex-wrap">
+                          <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600">
+                            State: {sme.state}
+                          </span>
+                          <span className="inline-flex items-center rounded-md bg-violet-50 px-2 py-1 text-[11px] font-medium text-violet-700 border border-violet-100">
+                            {sme.department}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleApproveSME(sme.sme_id)}
+                        disabled={approvingSMEId === sme.sme_id}
+                        className="inline-flex min-w-[100px] items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-violet-700 disabled:opacity-50"
+                      >
+                        {approvingSMEId === sme.sme_id ? (
+                          <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                        ) : (
+                          <><CheckCircle className="h-3.5 w-3.5" /> Approve</>
                         )}
                       </button>
                     </div>
@@ -467,40 +589,106 @@ const AdminDashboard: React.FC = () => {
                         </div>
                       </div>
 
+                      {/* History */}
+                      {report.history && report.history.length > 0 && (
+                        <div className="border-t border-slate-100 pt-2">
+                          <button
+                            onClick={() => setExpandedHistory(prev => ({ ...prev, [report.id]: !prev[report.id] }))}
+                            className="flex w-full items-center justify-between text-[12px] font-medium text-slate-500 hover:text-slate-700"
+                          >
+                            <span className="flex items-center gap-1.5">
+                              <HistoryIcon className="h-3.5 w-3.5" />
+                              History ({report.history.length})
+                            </span>
+                            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expandedHistory[report.id] ? "rotate-180" : ""}`} />
+                          </button>
+                          {expandedHistory[report.id] && (
+                            <ul className="mt-2 flex flex-col gap-1.5">
+                              {report.history.map((h, i) => (
+                                <li key={i} className="flex items-start justify-between text-[11px] text-slate-500">
+                                  <div className="flex flex-col">
+                                    <span className="font-medium text-slate-700">
+                                      {h.status} <span className="font-normal text-slate-400">by {h.actor_role} · {h.actor_id}</span>
+                                    </span>
+                                    {h.note && <span className="text-slate-400 italic">"{h.note}"</span>}
+                                  </div>
+                                  <span className="shrink-0 pl-2">{h.at.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+
                       {/* Department Actions */}
                       <div className="pt-3 mt-1 border-t border-slate-100">
-                        <p className="mb-2 text-[12px] font-semibold text-slate-900">Assign Departments:</p>
-                        <div className="flex flex-wrap gap-2 mb-4">
-                          {DEPARTMENTS.map(dept => {
-                            const isSelected = (departmentSelections[report.id] || []).includes(dept);
-                            return (
-                              <button
-                                key={dept}
-                                onClick={() => toggleDepartment(report.id, dept)}
-                                className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                                  isSelected 
-                                    ? "bg-blue-100 text-blue-700 border border-blue-200" 
-                                    : "bg-theme-base text-slate-600 border border-slate-200 hover:bg-slate-100"
-                                }`}
-                              >
-                                {dept}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <button
-                          onClick={() => handleAssign(report.id)}
-                          disabled={assigningId === report.id || !(departmentSelections[report.id]?.length > 0)}
-                          className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 py-2 text-[13px] font-semibold text-white transition-all shadow-sm hover:bg-slate-800 hover:shadow-md disabled:opacity-50"
-                        >
-                          {assigningId === report.id ? (
-                            <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          ) : (
-                            <>
-                              <Send className="w-3.5 h-3.5" /> Route to Departments
-                            </>
-                          )}
-                        </button>
+                        {report.status === "assigned" ? (
+                          <>
+                            <p className="mb-2 text-[12px] font-semibold text-slate-900">
+                              Assigned to: {(report.assignedDepartments || []).join(", ") || "—"}
+                            </p>
+                            <textarea
+                              value={reportNotes[report.id] ?? ""}
+                              onChange={(e) => setReportNotes(prev => ({ ...prev, [report.id]: e.target.value }))}
+                              placeholder="Optional resolution note"
+                              rows={2}
+                              className="mb-2 w-full resize-none rounded-lg border border-slate-200 bg-theme-base px-3 py-2 text-[12px] outline-none transition-all focus:border-green-500 focus:bg-white focus:ring-4 focus:ring-green-500/10"
+                            />
+                            <button
+                              onClick={() => handleResolve(report.id)}
+                              disabled={resolvingId === report.id}
+                              className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-600 py-2 text-[13px] font-semibold text-white transition-all shadow-sm hover:bg-green-700 disabled:opacity-50"
+                            >
+                              {resolvingId === report.id ? (
+                                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                              ) : (
+                                "Mark Resolved"
+                              )}
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <p className="mb-2 text-[12px] font-semibold text-slate-900">Assign Departments:</p>
+                            <textarea
+                              value={reportNotes[report.id] ?? ""}
+                              onChange={(e) => setReportNotes(prev => ({ ...prev, [report.id]: e.target.value }))}
+                              placeholder="Optional assignment note"
+                              rows={2}
+                              className="mb-2 w-full resize-none rounded-lg border border-slate-200 bg-theme-base px-3 py-2 text-[12px] outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
+                            />
+                            <div className="flex flex-wrap gap-2 mb-4">
+                              {DEPARTMENTS.map(dept => {
+                                const isSelected = (departmentSelections[report.id] || []).includes(dept);
+                                return (
+                                  <button
+                                    key={dept}
+                                    onClick={() => toggleDepartment(report.id, dept)}
+                                    className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                                      isSelected
+                                        ? "bg-blue-100 text-blue-700 border border-blue-200"
+                                        : "bg-theme-base text-slate-600 border border-slate-200 hover:bg-slate-100"
+                                    }`}
+                                  >
+                                    {dept}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <button
+                              onClick={() => handleAssign(report.id)}
+                              disabled={assigningId === report.id || !(departmentSelections[report.id]?.length > 0)}
+                              className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 py-2 text-[13px] font-semibold text-white transition-all shadow-sm hover:bg-slate-800 hover:shadow-md disabled:opacity-50"
+                            >
+                              {assigningId === report.id ? (
+                                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                              ) : (
+                                <>
+                                  <Send className="w-3.5 h-3.5" /> Route to Departments
+                                </>
+                              )}
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

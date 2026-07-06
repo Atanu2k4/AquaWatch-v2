@@ -1,9 +1,17 @@
 import React, { useState } from "react";
-import { Check, X, ArrowUpRight, MapPin, Clock, Droplets } from "lucide-react";
+import { Check, X, ArrowUpRight, MapPin, Clock, Droplets, History as HistoryIcon, ChevronDown } from "lucide-react";
 import { getFullImageUrl } from "../utils/api";
 
 export type ReportStatus = "pending" | "verified" | "rejected" | "escalated" | "assigned" | "in_progress" | "resolved";
 export type SensorCategory = "critical" | "warning" | "normal" | "good";
+
+export interface ReportHistoryEntry {
+  status: ReportStatus;
+  actor_role: "l1" | "admin" | "sme";
+  actor_id: string;
+  at: Date;
+  note?: string;
+}
 
 export interface IncidentReport {
   id: string;
@@ -17,13 +25,14 @@ export interface IncidentReport {
   createdAt: Date;
   aiAnalysis?: { summary?: string; hazardType?: string; severity?: string; confidence?: number } | null;
   assignedDepartments?: string[];
+  history?: ReportHistoryEntry[];
 }
 
 interface IncidentCardProps {
   report: IncidentReport;
-  onVerify: (id: string) => Promise<void>;
-  onReject: (id: string) => Promise<void>;
-  onEscalate: (id: string) => Promise<void>;
+  onVerify: (id: string, note?: string) => Promise<void>;
+  onReject: (id: string, note?: string) => Promise<void>;
+  onEscalate: (id: string, note?: string) => Promise<void>;
 }
 
 const categoryConfig: Record<SensorCategory, { label: string; text: string; bg: string; dot: string; border: string }> = {
@@ -40,12 +49,14 @@ const statusLabel: Record<ReportStatus, string> = {
 
 export const IncidentCard: React.FC<IncidentCardProps> = ({ report, onVerify, onReject, onEscalate }) => {
   const [busy, setBusy] = useState<"verify" | "reject" | "escalate" | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [note, setNote] = useState("");
   const cat = categoryConfig[report.sensorCategory];
   const canAct = report.status === "pending";
 
-  const act = (type: "verify" | "reject" | "escalate", fn: (id: string) => Promise<void>) => async () => {
+  const act = (type: "verify" | "reject" | "escalate", fn: (id: string, note?: string) => Promise<void>) => async () => {
     setBusy(type);
-    try { await fn(report.id); } finally { setBusy(null); }
+    try { await fn(report.id, note.trim() || undefined); setNote(""); } finally { setBusy(null); }
   };
 
   return (
@@ -110,9 +121,47 @@ export const IncidentCard: React.FC<IncidentCardProps> = ({ report, onVerify, on
             </div>
           )}
 
+          {/* History */}
+          {report.history && report.history.length > 0 && (
+            <div className="border-t border-slate-100 pt-2">
+              <button
+                onClick={() => setShowHistory(v => !v)}
+                className="flex w-full items-center justify-between text-[12px] font-medium text-slate-500 hover:text-slate-700"
+              >
+                <span className="flex items-center gap-1.5">
+                  <HistoryIcon className="h-3.5 w-3.5" />
+                  History ({report.history.length})
+                </span>
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showHistory ? "rotate-180" : ""}`} />
+              </button>
+              {showHistory && (
+                <ul className="mt-2 flex flex-col gap-1.5">
+                  {report.history.map((h, i) => (
+                    <li key={i} className="flex items-center justify-between text-[11px] text-slate-500">
+                      <div className="flex flex-col">
+                        <span className="font-medium text-slate-700">
+                          {statusLabel[h.status]} <span className="font-normal text-slate-400">by {h.actor_role} · {h.actor_id}</span>
+                        </span>
+                        {h.note && <span className="text-slate-400 italic">"{h.note}"</span>}
+                      </div>
+                      <span className="shrink-0 pl-2">{h.at.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {/* Actions */}
           {canAct && (
             <div className="flex flex-col gap-2 pt-3 mt-1 border-t border-slate-100">
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Optional note (e.g. reason for rejecting/escalating)"
+                rows={2}
+                className="w-full resize-none rounded-lg border border-slate-200 bg-theme-base px-3 py-2 text-[12px] outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
+              />
               <button
                 onClick={act("verify", onVerify)}
                 disabled={busy !== null}

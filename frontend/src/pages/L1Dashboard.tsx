@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../firebase/config";
+import { collection, query, where, getDocs } from "firebase/firestore";
+import { db, auth } from "../firebase/config";
 import { useAuth } from "../contexts/AuthContext";
-import { IncidentCard, type IncidentReport, type ReportStatus } from "../components/IncidentCard";
+import { IncidentCard, type IncidentReport } from "../components/IncidentCard";
 import { UserCheck, Inbox, Filter, RefreshCw, MapPin, LogOut } from "lucide-react";
+import * as api from "../utils/api";
 
 type FilterType = "all" | "pending" | "verified" | "rejected" | "escalated";
 
@@ -42,6 +43,8 @@ export const L1Dashboard: React.FC = () => {
           status: r.status ?? "pending",
           createdAt: r.createdAt?.toDate?.() ?? new Date(),
           aiAnalysis: r.aiAnalysis ?? null,
+          assignedDepartments: r.assignedDepartments ?? [],
+          history: (r.history ?? []).map((h: any) => ({ ...h, at: h.at?.toDate?.() ?? new Date() })),
         };
       });
 
@@ -70,9 +73,18 @@ export const L1Dashboard: React.FC = () => {
     setRefreshing(false);
   };
 
-  const updateStatus = async (id: string, status: ReportStatus) => {
-    await updateDoc(doc(db, "IncidentReports", id), { status, updatedAt: serverTimestamp() });
-    setReports(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+  const updateStatus = async (id: string, status: "verified" | "rejected" | "escalated", note?: string) => {
+    const idToken = await auth.currentUser?.getIdToken();
+    if (!idToken || !l1Data?.govtId) {
+      window.alert("Your session has expired. Please log in again.");
+      return;
+    }
+    try {
+      await api.updateReportStatusL1(l1Data.govtId, id, idToken, status, note);
+      setReports(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+    } catch (err: any) {
+      window.alert(`Could not update report: ${err.message}`);
+    }
   };
 
   const filtered = filter === "all" ? reports : reports.filter(r => r.status === filter);
@@ -188,9 +200,9 @@ export const L1Dashboard: React.FC = () => {
               <IncidentCard
                 key={report.id}
                 report={report}
-                onVerify={id => updateStatus(id, "verified")}
-                onReject={id => updateStatus(id, "rejected")}
-                onEscalate={id => updateStatus(id, "escalated")}
+                onVerify={(id, note) => updateStatus(id, "verified", note)}
+                onReject={(id, note) => updateStatus(id, "rejected", note)}
+                onEscalate={(id, note) => updateStatus(id, "escalated", note)}
               />
             ))}
           </div>

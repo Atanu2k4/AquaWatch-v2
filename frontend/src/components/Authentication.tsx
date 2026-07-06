@@ -4,13 +4,17 @@ import { AdminLogin } from "./AdminLogin";
 import { L1Login } from "./L1Login";
 import { L1Register } from "./L1Register";
 import { SuperAdminLogin } from "./SuperAdminLogin";
+import { SMELogin } from "./SMELogin";
+import { SMERegister } from "./SMERegister";
 
 type AuthStep =
   | "role-selection"
   | "admin-login"
   | "l1-login"
   | "l1-register"
-  | "superadmin-login";
+  | "superadmin-login"
+  | "sme-login"
+  | "sme-register";
 
 interface AuthenticationProps {
   onSuccess: () => void;
@@ -24,6 +28,7 @@ export const Authentication: React.FC<AuthenticationProps> = ({ onSuccess }) => 
       case "admin":      setCurrentStep("admin-login"); break;
       case "l1":         setCurrentStep("l1-login"); break;
       case "superadmin": setCurrentStep("superadmin-login"); break;
+      case "sme":        setCurrentStep("sme-login"); break;
     }
   };
 
@@ -44,6 +49,12 @@ export const Authentication: React.FC<AuthenticationProps> = ({ onSuccess }) => 
 
     case "superadmin-login":
       return <SuperAdminLogin onBack={back} onSuccess={onSuccess} />;
+
+    case "sme-login":
+      return <SMELogin onBack={back} onSuccess={onSuccess} onRegister={() => setCurrentStep("sme-register")} />;
+
+    case "sme-register":
+      return <SMERegister onBack={() => setCurrentStep("sme-login")} />;
 
     default:
       return <RoleSelection onSelectRole={handleRoleSelection} />;
