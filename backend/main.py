@@ -92,7 +92,12 @@ db = firestore.client()
 
 # ---------- Groq Setup ----------
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+# Short timeout + no retries: this call sits in the citizen's report-submission
+# request path. Default SDK behavior (60s timeout x 2 retries) can hold the
+# connection open long enough for the browser/proxy to drop it — which then
+# surfaces to the user as a misleading "blocked by CORS policy" error, since
+# CORS headers never get a chance to be read from an aborted response.
+groq_client = Groq(api_key=GROQ_API_KEY, timeout=12.0, max_retries=0) if GROQ_API_KEY else None
 
 # ---------- MongoDB Setup ----------
 try:
