@@ -26,6 +26,7 @@ from firebase_admin import auth as firebase_auth
 from google.api_core.exceptions import ResourceExhausted, DeadlineExceeded, ServiceUnavailable
 from groq import Groq
 import base64
+import uuid
 
 # MongoDB
 from pymongo import MongoClient, UpdateOne
@@ -478,6 +479,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+def root():
+    return {"status": "ok"}
+
 @app.get("/today-data")
 def get_today_data(api_key: str, valid: bool = Depends(verify_api_key)):
     today = str(date.today())
@@ -895,6 +900,100 @@ def superadmin_login(req: LoginRequest):
     if SUPER_ADMIN_ID and req.id == SUPER_ADMIN_ID and req.password == SUPER_ADMIN_PASSWORD:
         return {"ok": True, "role": "superadmin", "id": req.id}
     raise HTTPException(status_code=401, detail="Invalid super admin credentials")
+
+
+@app.post("/admin/{admin_id}/upload-csv")
+async def admin_upload_csv(admin_id: str, admin_password: str = Form(...), file: UploadFile = File(...)):
+    """Lets a state admin manually push sensor readings (e.g. dummy demo data)
+    through the same Firestore/Mongo pipeline sync_new_data() uses, without
+    needing the live CGWB feed. Scoped to the admin's own state."""
+    if ADMIN_CREDENTIALS.get(admin_id) != admin_password:
+        raise HTTPException(status_code=403, detail="Invalid admin credentials")
+
+    admin_state = _state_for_admin(admin_id)
+    if not admin_state:
+        raise HTTPException(status_code=400, detail="Could not determine state for this admin")
+
+    raw = await file.read()
+    try:
+        df = pd.read_csv(io.BytesIO(raw))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {e}")
+
+    required_cols = {"state_name", "date", "station_name", "currentlevel"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise HTTPException(status_code=400, detail=f"CSV missing required columns: {sorted(missing)}")
+
+    records = df.to_dict(orient="records")
+    valid_records = [normalize_row(r) for r in records if is_valid_row(r)]
+
+    skipped_other_state = sum(
+        1 for r in valid_records if str(r.get("state_name", "")).strip().lower() != admin_state.lower()
+    )
+    valid_records = [
+        r for r in valid_records if str(r.get("state_name", "")).strip().lower() == admin_state.lower()
+    ]
+    for r in valid_records:
+        r["state_name"] = admin_state  # normalize casing/spacing to the canonical name
+
+    if not valid_records:
+        return {"message": "No rows matched your state.", "rows_written": 0, "skipped_other_state": skipped_other_state}
+
+    state_id = admin_state.replace(".", "_")
+
+    # Firestore: same per-state subcollection shape sync_new_data() writes, with
+    # unique upload-scoped doc ids so they can't collide with the CSV-index-based ids
+    batch = db.batch()
+    for row in valid_records:
+        row_to_write = dict(row)
+        row_to_write["csv_index"] = None
+        row_to_write["source"] = row_to_write.get("source") or "manual_upload"
+        doc_ref = (db.collection(COLLECTION_NAME)
+                   .document(state_id)
+                   .collection("data")
+                   .document(f"upload_{uuid.uuid4().hex}"))
+        batch.set(doc_ref, row_to_write)
+    _firestore_commit_with_retry(batch)
+
+    # MongoDB: same $push-with-slice shape as sync_new_data()
+    if mongo_states_col is not None:
+        docs = [{
+            "date": r.get("date"),
+            "station_name": r.get("station_name"),
+            "district_name": r.get("district_name"),
+            "latitude": r.get("latitude"),
+            "longitude": r.get("longitude"),
+            "currentlevel": r.get("currentlevel"),
+            "level_diff": r.get("level_diff"),
+            "csv_index": None,
+        } for r in valid_records]
+        MAX_PER_STATE = int(os.getenv("MONGO_STATE_LIMIT", "50000"))
+        mongo_states_col.update_one(
+            {"_id": state_id},
+            {"$push": {"data": {"$each": docs, "$slice": -MAX_PER_STATE}}},
+            upsert=True,
+        )
+
+    # New stations have no historical station_ranges doc (import_csv.py, which
+    # populated it, no longer runs) — self-compute a 0-100 range for them so
+    # update_dwlr_aggregates() can still bucket their readings into a category.
+    if station_ranges_col is not None:
+        for r in valid_records:
+            station = str(r.get("station_name", "")).strip()
+            if not station:
+                continue
+            range_id = f"{admin_state}||{station}"
+            if station_ranges_col.find_one({"_id": range_id}) is None:
+                station_ranges_col.insert_one({"_id": range_id, "lo": 0.0, "hi": 100.0})
+
+    update_dwlr_aggregates(valid_records, STATE_COLUMN)
+
+    return {
+        "message": f"Uploaded {len(valid_records)} row(s) for {admin_state}.",
+        "rows_written": len(valid_records),
+        "skipped_other_state": skipped_other_state,
+    }
 
 
 # ---------- Run ----------

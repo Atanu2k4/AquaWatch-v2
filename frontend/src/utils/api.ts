@@ -4,6 +4,17 @@
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const API_KEY = import.meta.env.VITE_BACKEND_API_KEY ?? "dev-local-key";
 
+export const getFullImageUrl = (url: string) => {
+  if (!url) return url;
+  if (url.startsWith('/')) {
+    return `${BASE_URL}${url}`;
+  }
+  if (url.startsWith('http://localhost:8000')) {
+    return url.replace('http://localhost:8000', BASE_URL);
+  }
+  return url;
+};
+
 async function request<T>(
   method: "GET" | "POST",
   path: string,
@@ -155,4 +166,23 @@ export const submitIncidentReport = async (formData: FormData) => {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as any)?.detail ?? res.statusText);
   return data as IncidentReportResponse;
+};
+
+export interface UploadCsvResponse {
+  message: string;
+  rows_written: number;
+  skipped_other_state: number;
+}
+
+export const uploadStateCsv = async (adminId: string, adminPassword: string, file: File) => {
+  const formData = new FormData();
+  formData.append("admin_password", adminPassword);
+  formData.append("file", file);
+  const res = await fetch(`${BASE_URL}/admin/${encodeURIComponent(adminId)}/upload-csv`, {
+    method: "POST",
+    body: formData,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as any)?.detail ?? res.statusText);
+  return data as UploadCsvResponse;
 };

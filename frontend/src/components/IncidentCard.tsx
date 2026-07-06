@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Check, X, ArrowUpRight, MapPin, Clock, Droplets } from "lucide-react";
+import { getFullImageUrl } from "../utils/api";
 
 export type ReportStatus = "pending" | "verified" | "rejected" | "escalated" | "assigned" | "in_progress" | "resolved";
 export type SensorCategory = "critical" | "warning" | "normal" | "good";
@@ -53,7 +54,7 @@ export const IncidentCard: React.FC<IncidentCardProps> = ({ report, onVerify, on
       {/* Image Area - Minimal */}
       {report.imageUrl && (
         <div className="relative h-40 w-full bg-slate-100 border-b border-slate-100">
-          <img src={report.imageUrl} alt="Incident" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+          <img src={getFullImageUrl(report.imageUrl)} alt="Incident" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
           <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/60 to-transparent" />
           
           <div className="absolute bottom-2.5 left-3 flex items-center text-white/90 text-xs font-medium drop-shadow-md">

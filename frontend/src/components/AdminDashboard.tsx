@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, query, where, getDocs, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "../firebase/config";
-import { Shield, UserCheck, CheckCircle, XCircle, LogOut, RefreshCw, AlertTriangle, Waves, Building2, Send, MapPin, Clock, Droplets, Users } from "lucide-react";
+import { Shield, UserCheck, CheckCircle, XCircle, LogOut, RefreshCw, AlertTriangle, Waves, Building2, Send, MapPin, Clock, Droplets, Users, UploadCloud } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import * as api from "../utils/api";
 import { type IncidentReport, type ReportStatus, type SensorCategory } from "../components/IncidentCard";
@@ -42,6 +42,10 @@ const AdminDashboard: React.FC = () => {
   const [loadingReports, setLoadingReports] = useState(true);
   const [departmentSelections, setDepartmentSelections] = useState<Record<string, string[]>>({});
   const [assigningId, setAssigningId] = useState<string | null>(null);
+
+  const [uploadPassword, setUploadPassword] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const DEPARTMENTS = [
     "Water Supply Board",
@@ -158,6 +162,30 @@ const AdminDashboard: React.FC = () => {
       setMessage({ ok: false, text: `Failed to assign report: ${err.message}` });
     } finally {
       setAssigningId(null);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!uploadFile) {
+      setMessage({ ok: false, text: "Choose a CSV file first." });
+      return;
+    }
+    if (!uploadPassword) {
+      setMessage({ ok: false, text: "Admin password is required to upload." });
+      return;
+    }
+    setUploading(true);
+    try {
+      const res = await api.uploadStateCsv(adminId, uploadPassword, uploadFile);
+      setMessage({
+        ok: true,
+        text: `${res.message}${res.skipped_other_state ? ` (${res.skipped_other_state} row(s) skipped — different state)` : ""}`,
+      });
+      setUploadFile(null);
+    } catch (err: any) {
+      setMessage({ ok: false, text: `Upload failed: ${err.message}` });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -322,6 +350,46 @@ const AdminDashboard: React.FC = () => {
           )}
         </div>
 
+        {/* --- SECTION: Upload Sensor Data CSV --- */}
+        <div className="mb-10">
+          <h2 className="mb-4 text-[18px] font-bold text-slate-900 flex items-center gap-2">
+            <UploadCloud className="w-5 h-5 text-blue-600" />
+            Upload Sensor Data ({adminState || "Unknown state"})
+          </h2>
+          <div className="p-6 bg-white/60 backdrop-blur-md border border-white/60 shadow-lg rounded-2xl">
+            <p className="mb-4 text-[14px] text-slate-500">
+              Upload a CSV (columns: state_name, date, station_name, currentlevel, ...) to push readings into MongoDB and Firebase
+              without waiting on the live feed. Only rows matching your state ({adminState || "—"}) are written.
+            </p>
+            <div className="flex flex-col max-w-lg gap-3 sm:flex-row">
+              <input
+                type="password"
+                placeholder="Admin Password"
+                value={uploadPassword}
+                onChange={(e) => setUploadPassword(e.target.value)}
+                className="flex-1 rounded-lg border border-slate-200 bg-theme-base px-4 py-2 text-[14px] outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
+              />
+              <input
+                type="file"
+                accept=".csv"
+                onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+                className="flex-1 rounded-lg border border-slate-200 bg-theme-base px-3 py-2 text-[13px] outline-none file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-[12px] file:font-semibold file:text-white"
+              />
+              <button
+                onClick={handleUpload}
+                disabled={uploading}
+                className="flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-6 py-2 text-[14px] font-semibold text-white transition-colors hover:bg-slate-800 disabled:opacity-50"
+              >
+                {uploading ? (
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                ) : (
+                  "Upload"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* --- SECTION: Escalated Reports Routing --- */}
         <div>
           <h2 className="mb-4 text-[18px] font-bold text-slate-900 flex items-center gap-2">
@@ -354,7 +422,7 @@ const AdminDashboard: React.FC = () => {
                   {/* Image Area - Minimal */}
                   {report.imageUrl && (
                     <div className="relative w-full h-40 bg-slate-100 border-b border-slate-100">
-                      <img src={report.imageUrl} alt="Incident" className="object-cover w-full h-full transition-transform duration-500 group-hover:scale-105" />
+                      <img src={api.getFullImageUrl(report.imageUrl)} alt="Incident" className="object-cover w-full h-full transition-transform duration-500 group-hover:scale-105" />
                       <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/60 to-transparent" />
                       
                       <div className="absolute bottom-2.5 left-3 flex items-center text-white/90 text-xs font-medium drop-shadow-md">
