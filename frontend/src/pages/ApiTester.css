@@ -1,0 +1,276 @@
+/* ApiTester.css — dark dev-tool style */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+.tester-root {
+  min-height: 100vh;
+  background: #0d1117;
+  color: #e6edf3;
+  font-family: 'Inter', sans-serif;
+}
+
+/* ── Header ── */
+.tester-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 1.25rem 2rem;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.header-icon {
+  font-size: 2rem;
+  filter: drop-shadow(0 0 8px #38bdf880);
+}
+
+.header-brand h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.header-brand p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+
+.header-brand code {
+  background: #21262d;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  color: #79c0ff;
+}
+
+.global-key {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+}
+
+.global-key label {
+  font-size: 0.75rem;
+  color: #8b949e;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.global-key input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #f0f6fc;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  width: 180px;
+}
+
+/* ── Main grid ── */
+.tester-main {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+  gap: 1.25rem;
+  padding: 1.5rem 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* ── Cards ── */
+.card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+  border-color: #58a6ff40;
+  box-shadow: 0 0 0 1px #58a6ff20;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.method-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 5px;
+  color: #fff;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.card-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  color: #e6edf3;
+}
+
+.card-desc {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #8b949e;
+  line-height: 1.5;
+}
+
+/* ── Fields ── */
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.field-row label {
+  font-size: 0.75rem;
+  color: #8b949e;
+  min-width: 110px;
+  font-weight: 500;
+}
+
+.field-row input {
+  flex: 1;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 0.4rem 0.65rem;
+  color: #e6edf3;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.field-row input:focus {
+  border-color: #388bfd;
+}
+
+.field-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ── Buttons ── */
+button {
+  align-self: flex-start;
+  background: linear-gradient(135deg, #1f6feb, #388bfd);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: 0.5rem 1.1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+button:hover { opacity: 0.88; transform: translateY(-1px); }
+button:active { transform: translateY(0); }
+
+.btn-warn {
+  background: linear-gradient(135deg, #b45309, #f59e0b);
+}
+
+/* ── Result Box ── */
+.result-box {
+  border-radius: 8px;
+  padding: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.result-box.loading {
+  background: #21262d;
+  color: #8b949e;
+}
+
+.result-box.success {
+  background: #0d2818;
+  border: 1px solid #238636;
+}
+
+.result-box.fail {
+  background: #2d1214;
+  border: 1px solid #f85149;
+}
+
+.result-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+}
+
+.badge-ok { background: #238636; color: #fff; }
+.badge-fail { background: #da3633; color: #fff; }
+
+.result-time {
+  font-size: 0.7rem;
+  color: #8b949e;
+}
+
+.result-error {
+  margin: 0 0 0.5rem;
+  color: #f85149;
+  font-family: 'Inter', sans-serif;
+}
+
+.result-json {
+  margin: 0;
+  color: #adbac7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Scrollbar */
+.result-box::-webkit-scrollbar { width: 5px; }
+.result-box::-webkit-scrollbar-track { background: transparent; }
+.result-box::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+
+@media (max-width: 600px) {
+  .tester-main { grid-template-columns: 1fr; padding: 1rem; }
+  .tester-header { padding: 1rem; }
+  .global-key input { width: 120px; }
+}

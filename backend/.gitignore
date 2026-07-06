@@ -1,0 +1,10 @@
+data/
+.env
+predictions/
+.venv/
+__pycache__/
+*.pyc
+*.log
+
+# Firebase service account keys — never commit these
+*firebase-adminsdk*.json
