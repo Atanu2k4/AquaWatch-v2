@@ -115,7 +115,6 @@ export const WaterDataProvider: React.FC<{ children: React.ReactNode }> = ({
       const data: StateData = {};
 
       if (querySnapshot.empty) {
-        console.log("No DWLR_state documents found, using fallback data");
         // If no data exists in Firebase, create some initial data
         await createInitialStateData();
         return getAllStatesData(); // Retry after creating initial data
@@ -126,7 +125,6 @@ export const WaterDataProvider: React.FC<{ children: React.ReactNode }> = ({
         const stateName = stateDoc.id.replace("_", " "); // Convert back from Firebase document ID format
         const stateData = stateDoc.data();
 
-        console.log(`Processing state: ${stateName}`, stateData);
 
         try {
           // Check if the state document already has processed water level data
@@ -136,9 +134,6 @@ export const WaterDataProvider: React.FC<{ children: React.ReactNode }> = ({
 
           // If waterLevel exists and is not the default 50, use it directly
           if (currentWaterLevel && currentWaterLevel !== 50) {
-            console.log(
-              `Using existing water level for ${stateName}: ${currentWaterLevel}%`
-            );
           } else {
             // Try to get the latest data from the state's data subcollection
             try {
@@ -186,23 +181,14 @@ export const WaterDataProvider: React.FC<{ children: React.ReactNode }> = ({
                       waterLevel: entry.waterLevel,
                     }));
 
-                  console.log(
-                    `Found real data for ${stateName}: ${currentWaterLevel}% from ${allDataEntries.length} records`
-                  );
                 }
               }
             } catch (subCollectionError) {
-              console.log(
-                `No subcollection data for ${stateName}, using default`
-              );
             }
 
             // If still no real data found, use default
             if (!currentWaterLevel) {
               currentWaterLevel = 50;
-              console.log(
-                `Using fallback data for ${stateName}: ${currentWaterLevel}%`
-              );
             }
           }
 
@@ -235,7 +221,6 @@ export const WaterDataProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
 
-      console.log("Processed Firebase DWLR data:", data);
       setStateWaterData(data);
       return data;
     } catch (err) {
@@ -252,13 +237,11 @@ export const WaterDataProvider: React.FC<{ children: React.ReactNode }> = ({
   // Create initial state data in Firebase if none exists
   const createInitialStateData = async () => {
     try {
-      console.log("Creating initial state data in Firebase...");
       const dwlrCollectionRef = collection(db, "DWLR_state");
 
       // Check if any data already exists
       const existingData = await getDocs(dwlrCollectionRef);
       if (!existingData.empty) {
-        console.log("Data already exists, skipping creation");
         return;
       }
 
@@ -414,7 +397,6 @@ export const WaterDataProvider: React.FC<{ children: React.ReactNode }> = ({
         });
       }
 
-      console.log("Initial state data created successfully");
     } catch (error) {
       console.error("Error creating initial state data:", error);
     }

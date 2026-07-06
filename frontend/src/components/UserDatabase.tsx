@@ -9,22 +9,26 @@ export const UserDatabase: React.FC = () => {
   const { userData, logout, isAdmin } = useAuth();
   
   const adminId = (userData as any)?.id ?? "";
-  const adminPassword = (userData as any)?.password ?? "";
+  // Password isn't persisted across reloads (kept out of localStorage on purpose,
+  // see AuthContext) — the backend re-checks it on every call, so ask for it here
+  // the same way AdminDashboard's L1 Approvals section does.
+  const [adminPassword, setAdminPassword] = useState((userData as any)?.password ?? "");
 
   const [authorities, setAuthorities] = useState<api.PendingL1[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  const loadAuthorities = async () => {
+  const loadAuthorities = async (password: string) => {
+    if (!password) return;
     setLoading(true);
     try {
-      const res = await api.getAllL1(adminId, adminPassword);
+      const res = await api.getAllL1(adminId, password);
       setAuthorities(res.authorities || []);
       setMessage(null);
     } catch (err: any) {
-      setMessage({ ok: false, text: "Failed to load L1 authorities." });
+      setMessage({ ok: false, text: "Failed to load L1 authorities. Invalid password?" });
     } finally {
       setLoading(false);
     }
@@ -32,9 +36,9 @@ export const UserDatabase: React.FC = () => {
 
   useEffect(() => {
     if (isAdmin && adminId && adminPassword) {
-      loadAuthorities();
+      loadAuthorities(adminPassword);
     }
-  }, [isAdmin, adminId, adminPassword]);
+  }, [isAdmin, adminId]);
 
   const handleStatusChange = async (govtId: string, newStatus: string) => {
     setUpdatingId(govtId);
@@ -84,9 +88,9 @@ export const UserDatabase: React.FC = () => {
             <button
               onClick={() => {
                 setRefreshing(true);
-                loadAuthorities().then(() => setRefreshing(false));
+                loadAuthorities(adminPassword).then(() => setRefreshing(false));
               }}
-              disabled={refreshing}
+              disabled={refreshing || !adminPassword}
               className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
@@ -128,6 +132,30 @@ export const UserDatabase: React.FC = () => {
           </div>
         )}
 
+        {!adminPassword && (
+          <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="mb-4 text-[14px] text-slate-500">
+              Enter your admin password to load registered L1 authorities.
+            </p>
+            <div className="flex max-w-md flex-col gap-3 sm:flex-row">
+              <input
+                type="password"
+                placeholder="Admin Password"
+                value={adminPassword}
+                onChange={(e) => setAdminPassword(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && loadAuthorities(adminPassword)}
+                className="flex-1 rounded-lg border border-slate-200 bg-theme-base px-4 py-2 text-[14px] outline-none transition-all focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
+              />
+              <button
+                onClick={() => loadAuthorities(adminPassword)}
+                className="rounded-lg bg-slate-900 px-6 py-2 text-[14px] font-semibold text-white transition-colors hover:bg-slate-800"
+              >
+                Load
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
           <div className="border-b border-slate-100 bg-theme-base px-6 py-4 flex items-center justify-between">
             <h3 className="text-[14px] font-semibold text-slate-900 flex items-center gap-2">
@@ -136,7 +164,7 @@ export const UserDatabase: React.FC = () => {
             </h3>
           </div>
 
-          {loading ? (
+          {!adminPassword ? null : loading ? (
             <div className="flex h-48 items-center justify-center">
               <div className="flex flex-col items-center gap-2">
                 <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600/30 border-t-blue-600" />
