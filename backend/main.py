@@ -73,7 +73,17 @@ def _state_for_admin(admin_id: str) -> str | None:
 
 
 # ---------- Firebase Setup ----------
-cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS_PATH"))
+firebase_cred_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
+firebase_cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH")
+
+if firebase_cred_json:
+    cred_dict = json.loads(firebase_cred_json)
+    cred = credentials.Certificate(cred_dict)
+elif firebase_cred_path:
+    cred = credentials.Certificate(firebase_cred_path)
+else:
+    raise ValueError("Must set either FIREBASE_CREDENTIALS_JSON or FIREBASE_CREDENTIALS_PATH")
+
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 
