@@ -610,7 +610,10 @@ def _district_sensor_avg(
             station_name = r.get("station_name")
             station_lat, station_lng = r.get("latitude"), r.get("longitude")
             if station_name and station_lat is not None and station_lng is not None:
-                stations.setdefault(station_name, (station_lat, station_lng))
+                try:
+                    stations.setdefault(station_name, (float(station_lat), float(station_lng)))
+                except (ValueError, TypeError):
+                    pass
         if stations:
             nearest = min(stations, key=lambda s: _haversine_km(lat, lng, stations[s][0], stations[s][1]))
             nearest_rows = [r for r in all_rows if r.get("station_name") == nearest]
