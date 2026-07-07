@@ -134,7 +134,7 @@ export const RoleSelection: React.FC<RoleSelectionProps> = ({ onSelectRole }) =>
                 <button
                   key={r.role}
                   onClick={() => onSelectRole(r.role)}
-                  className="group flex flex-col items-start rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
+                  className="group flex h-full w-full flex-col items-start rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
                 >
                   {/* Badge */}
                   <span
@@ -156,7 +156,7 @@ export const RoleSelection: React.FC<RoleSelectionProps> = ({ onSelectRole }) =>
                   <p className="mb-5 flex-1 text-[13px] leading-relaxed text-slate-500">
                     {r.description}
                   </p>
-                  <span className="flex items-center gap-1.5 text-[13px] font-semibold text-slate-900">
+                  <span className="mt-auto flex items-center gap-1.5 text-[13px] font-semibold text-slate-900">
                     Sign in
                     <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
                   </span>

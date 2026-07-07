@@ -88,7 +88,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onBack, onSuccess }) => 
               <div>
                 <label className="mb-1.5 block text-[13px] font-medium text-slate-700">Password</label>
                 <div className="relative">
-                  <Lock className="absolute w-4 h-4 mb-1 -translate-y-1/2 pointer-events-none mb left-3 top-1/2 text-slate-400" />
+                  <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <input
                     type={showPassword ? "text" : "password"}
                     value={password}
@@ -100,7 +100,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onBack, onSuccess }) => 
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute -translate-y-1/2 right-3 top-1/2 text-slate-400 hover:text-slate-600"
+                    className="absolute right-3 top-1/2 -mt-2 flex items-center justify-center text-slate-400 hover:text-slate-600"
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
