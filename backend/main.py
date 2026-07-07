@@ -545,14 +545,24 @@ def _exif_gps(image_bytes: bytes) -> tuple[float, float] | None:
             return None
 
         def _to_deg(dms, ref):
-            deg, minutes, seconds = (float(v) for v in dms)
+            def _val(x):
+                if hasattr(x, 'numerator') and hasattr(x, 'denominator'):
+                    return float(x.numerator) / float(x.denominator) if x.denominator != 0 else 0.0
+                if isinstance(x, (tuple, list)) and len(x) == 2:
+                    return float(x[0]) / float(x[1]) if float(x[1]) != 0 else 0.0
+                return float(x)
+
+            deg = _val(dms[0])
+            minutes = _val(dms[1])
+            seconds = _val(dms[2])
             value = deg + minutes / 60 + seconds / 3600
             return -value if ref in ("S", "W") else value
 
         lat = _to_deg(gps_ifd[2], gps_ifd[1])
         lng = _to_deg(gps_ifd[4], gps_ifd[3])
         return (lat, lng)
-    except Exception:
+    except Exception as e:
+        logging.warning(f"EXIF parsing failed: {e}")
         return None
 
 
@@ -695,16 +705,14 @@ def get_incident_image(image_id: str):
 def _resize_image(image_bytes: bytes, max_size: tuple[int, int] = (1024, 1024)) -> bytes:
     try:
         with Image.open(io.BytesIO(image_bytes)) as img:
-            # Preserve EXIF during resize if possible
-            exif = img.info.get('exif', b'')
-            
             # Convert to RGB if necessary (e.g. RGBA)
             if img.mode in ('RGBA', 'P'):
                 img = img.convert('RGB')
                 
             img.thumbnail(max_size, Image.Resampling.LANCZOS)
             out_io = io.BytesIO()
-            img.save(out_io, format='JPEG', exif=exif, quality=85)
+            # Strip EXIF from the resized image to prevent Pillow encoding errors
+            img.save(out_io, format='JPEG', quality=85)
             return out_io.getvalue()
     except Exception as e:
         logging.warning(f"Image resize failed, using original: {e}")
@@ -726,12 +734,14 @@ async def create_incident_report(
         raise HTTPException(status_code=503, detail="MongoDB not connected")
     
     raw_image_bytes = await image.read()
-    image_bytes = _resize_image(raw_image_bytes)
-
+    
+    # Extract GPS from the original image containing EXIF before resizing strips it
     if lat is None or lng is None:
-        exif_coords = _exif_gps(image_bytes)
+        exif_coords = _exif_gps(raw_image_bytes)
         if exif_coords:
             lat, lng = exif_coords
+
+    image_bytes = _resize_image(raw_image_bytes)
 
     from bson import Binary
     image_doc = incident_images_col.insert_one({
