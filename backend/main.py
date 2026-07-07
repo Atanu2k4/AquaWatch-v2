@@ -692,6 +692,24 @@ def get_incident_image(image_id: str):
     return Response(content=bytes(doc["data"]), media_type=doc.get("content_type", "image/jpeg"))
 
 
+def _resize_image(image_bytes: bytes, max_size: tuple[int, int] = (1024, 1024)) -> bytes:
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as img:
+            # Preserve EXIF during resize if possible
+            exif = img.info.get('exif', b'')
+            
+            # Convert to RGB if necessary (e.g. RGBA)
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+                
+            img.thumbnail(max_size, Image.Resampling.LANCZOS)
+            out_io = io.BytesIO()
+            img.save(out_io, format='JPEG', exif=exif, quality=85)
+            return out_io.getvalue()
+    except Exception as e:
+        logging.warning(f"Image resize failed, using original: {e}")
+        return image_bytes
+
 @app.post("/incident-reports")
 async def create_incident_report(
     request: Request,
@@ -706,7 +724,9 @@ async def create_incident_report(
 ):
     if incident_images_col is None:
         raise HTTPException(status_code=503, detail="MongoDB not connected")
-    image_bytes = await image.read()
+    
+    raw_image_bytes = await image.read()
+    image_bytes = _resize_image(raw_image_bytes)
 
     if lat is None or lng is None:
         exif_coords = _exif_gps(image_bytes)
