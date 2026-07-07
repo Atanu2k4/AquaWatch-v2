@@ -1,6 +1,17 @@
 import React, { useState } from "react";
-import { Check, X, ArrowUpRight, MapPin, Clock, Droplets, History as HistoryIcon, ChevronDown } from "lucide-react";
+import { Check, X, ArrowUpRight, MapPin, Clock, Droplets, History as HistoryIcon, ChevronDown, Map as MapIcon, Image as ImageIcon } from "lucide-react";
 import { getFullImageUrl } from "../utils/api";
+import { MapContainer, TileLayer, Marker } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+
+// Fix Leaflet's default icon path issues
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: require("leaflet/dist/images/marker-icon-2x.png"),
+  iconUrl: require("leaflet/dist/images/marker-icon.png"),
+  shadowUrl: require("leaflet/dist/images/marker-shadow.png"),
+});
 
 export type ReportStatus = "pending" | "verified" | "rejected" | "escalated" | "assigned" | "in_progress" | "resolved";
 export type SensorCategory = "critical" | "warning" | "normal" | "good";
@@ -50,9 +61,11 @@ const statusLabel: Record<ReportStatus, string> = {
 export const IncidentCard: React.FC<IncidentCardProps> = ({ report, onVerify, onReject, onEscalate }) => {
   const [busy, setBusy] = useState<"verify" | "reject" | "escalate" | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showMap, setShowMap] = useState(false);
   const [note, setNote] = useState("");
   const cat = categoryConfig[report.sensorCategory];
   const canAct = report.status === "pending";
+  const hasCoords = report.location.lat != null && report.location.lng != null;
 
   const act = (type: "verify" | "reject" | "escalate", fn: (id: string, note?: string) => Promise<void>) => async () => {
     setBusy(type);
@@ -63,20 +76,56 @@ export const IncidentCard: React.FC<IncidentCardProps> = ({ report, onVerify, on
     <div className="group flex flex-col bg-white/70 backdrop-blur-md border border-white/60 rounded-xl overflow-hidden shadow-[0_4px_16px_rgb(0,0,0,0.04)] hover:shadow-[0_12px_32px_rgb(0,0,0,0.08)] hover:-translate-y-1 hover:border-blue-200/50 transition-all duration-300">
       
       {/* Image Area - Minimal */}
-      {report.imageUrl && (
-        <div className="relative h-40 w-full bg-slate-100 border-b border-slate-100">
-          <img src={getFullImageUrl(report.imageUrl)} alt="Incident" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-          <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/60 to-transparent" />
-          
-          <div className="absolute bottom-2.5 left-3 flex items-center text-white/90 text-xs font-medium drop-shadow-md">
-            <MapPin className="h-3.5 w-3.5 mr-1" />
-            {report.location.district || report.location.state || "Unknown location"}
-          </div>
+      {(report.imageUrl || hasCoords) && (
+        <div className="relative h-48 w-full bg-slate-100 border-b border-slate-100">
+          {showMap && hasCoords ? (
+            <div className="w-full h-full z-0 relative">
+              <MapContainer 
+                center={[report.location.lat!, report.location.lng!]} 
+                zoom={16} 
+                className="w-full h-full"
+                zoomControl={false}
+              >
+                <TileLayer
+                  url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                  attribution="&copy; Esri World Imagery"
+                  maxZoom={19}
+                />
+                <Marker position={[report.location.lat!, report.location.lng!]} />
+              </MapContainer>
+            </div>
+          ) : (
+            <>
+              <img src={getFullImageUrl(report.imageUrl)} alt="Incident" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+              <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/60 to-transparent" />
+              
+              <div className="absolute bottom-2.5 left-3 flex flex-col text-white/90 drop-shadow-md">
+                <div className="flex items-center text-xs font-medium">
+                  <MapPin className="h-3.5 w-3.5 mr-1" />
+                  {report.location.district || report.location.state || "Unknown location"}
+                </div>
+                {hasCoords && (
+                  <div className="text-[10px] text-white/70 ml-4.5 mt-0.5">
+                    {report.location.lat?.toFixed(4)}, {report.location.lng?.toFixed(4)}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
-          <div className={`absolute top-3 right-3 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 bg-white/95 backdrop-blur-sm border shadow-sm ${cat.text} ${cat.border}`}>
+          <div className={`absolute top-3 right-3 z-10 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 bg-white/95 backdrop-blur-sm border shadow-sm ${cat.text} ${cat.border}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${cat.dot}`} />
             {cat.label}
           </div>
+
+          {hasCoords && (
+            <button
+              onClick={() => setShowMap(!showMap)}
+              className="absolute bottom-2.5 right-3 z-10 flex items-center justify-center gap-1.5 bg-white/90 backdrop-blur-sm text-slate-800 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm hover:bg-white transition-colors"
+            >
+              {showMap ? <><ImageIcon className="w-3.5 h-3.5" /> Photo</> : <><MapIcon className="w-3.5 h-3.5" /> Map</>}
+            </button>
+          )}
         </div>
       )}
 
